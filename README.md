@@ -10,6 +10,10 @@ This tool gives you that single pane of glass — and lets you fix things, with 
 - 🔒 **Local only** — binds to `127.0.0.1`, reads/writes only your own settings files.
 - 💾 **Safe by default** — nothing is written until you click **Apply**; every file is backed up first.
 
+![The Risk tab — what can run without asking me, ranked by severity](docs/screenshot-risk.png)
+
+> *The ⚠ Risk tab flags every capability that runs **without a prompt** — `sudo`, remote `ssh`, `curl`, `docker`, … — grouped by severity, with one-click "require approval" or "block".*
+
 ---
 
 ## Quick start
@@ -36,6 +40,8 @@ Requires Python 3.8+. Tested on Linux; should work anywhere Python + a browser r
 ### 🗂 All Rules
 Every permission rule from every file in one place, organized by a **Project** dropdown and collapsed into per-file groups (so it's scannable even with hundreds of rules). Filter by text, type, scope, or project. Per-rule actions: change type (`allow` ↔ `ask` ↔ `deny`), move/promote to another file, or delete — plus an add-rule form.
 
+![All Rules tab](docs/screenshot-rules.png)
+
 ### 🧭 By Project
 The **effective merged ruleset** each project actually sees (its own rules **+** all global rules), ordered `deny → ask → allow`. Type a rule (e.g. `WebSearch`) to see exactly how it resolves in each project, with rules that are shadowed by a broader one greyed out. Each row is tagged with where it came from (`global` vs `this project`).
 
@@ -52,6 +58,8 @@ Automated cleanup, each with a one-click (staged) fix:
 
 ### 🧠 Memories
 Browse and edit Claude Code's [auto-memory](https://code.claude.com/docs/en/memory) files across every scope (your global `~/.claude/projects/.../memory/` and each project's). Filter by scope, type (`user`/`feedback`/`project`/`reference`), or full-text search; expand to read the body and follow `[[links]]`. Edit description/type/body inline or delete — staged like everything else, and a delete also removes the matching line from that scope's `MEMORY.md` index.
+
+![Memories tab](docs/screenshot-memories.png)
 
 ---
 
