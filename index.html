@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Settings Manager</title>
+<style>
+  :root {
+    --bg: #14110f; --panel: #1f1b18; --panel2: #272220; --line: #3a322d;
+    --ink: #ece6df; --dim: #9a9088; --accent: #d98a4b;
+    --allow: #5fb37a; --ask: #d7a64a; --deny: #d4604f;
+    --hi: #d4604f; --med: #d7a64a; --low: #7f8a93; --info: #6a8fb0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 16px; margin: 0; letter-spacing: .3px; }
+  h1 .dot { color: var(--accent); }
+  .meta { color: var(--dim); font-size: 12px; }
+  .tabs { display: flex; gap: 4px; padding: 8px 16px 0; border-bottom: 1px solid var(--line); }
+  .tab { padding: 8px 16px; cursor: pointer; border: 1px solid transparent;
+    border-bottom: none; border-radius: 7px 7px 0 0; color: var(--dim); }
+  .tab.active { background: var(--panel); color: var(--ink); border-color: var(--line); }
+  .tab .badge { color: var(--accent); }
+  main { padding: 16px 20px 70px; }
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+  input, select, button { font: inherit; background: var(--panel2); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; }
+  input[type=text] { min-width: 220px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.danger:hover { border-color: var(--deny); color: var(--deny); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line);
+    vertical-align: top; }
+  th { color: var(--dim); font-weight: 600; font-size: 12px; text-transform: uppercase;
+    letter-spacing: .5px; position: sticky; top: 0; background: var(--bg); cursor: pointer; }
+  tr:hover td { background: var(--panel); }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 20px; font-size: 12px;
+    font-weight: 600; }
+  .t-allow { color: var(--allow); border: 1px solid var(--allow); }
+  .t-ask { color: var(--ask); border: 1px solid var(--ask); }
+  .t-deny { color: var(--deny); border: 1px solid var(--deny); }
+  .raw { color: var(--ink); }
+  .tool { color: var(--accent); }
+  .filepath { color: var(--dim); font-size: 11px; word-break: break-all; }
+  .scope { color: var(--dim); font-size: 12px; }
+  .actions { white-space: nowrap; display: flex; gap: 4px; }
+  .actions select, .actions button { padding: 3px 6px; font-size: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+    padding: 12px 14px; margin-bottom: 10px; }
+  .card .sev { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
+  .sev-high { color: var(--hi); } .sev-medium { color: var(--med); }
+  .sev-low { color: var(--low); } .sev-info { color: var(--info); }
+  .card h3 { margin: 4px 0 4px; font-size: 14px; }
+  .card .d { color: var(--dim); font-size: 13px; }
+  .count { color: var(--dim); font-size: 12px; }
+  .toast { position: fixed; bottom: 18px; right: 18px; background: var(--panel2);
+    border: 1px solid var(--accent); padding: 10px 16px; border-radius: 8px;
+    opacity: 0; transition: opacity .2s; max-width: 420px; }
+  .toast.show { opacity: 1; }
+  .toast.err { border-color: var(--deny); }
+  .empty { color: var(--dim); padding: 30px; text-align: center; }
+  .proj-head { color: var(--accent); margin: 18px 0 6px; font-size: 13px;
+    text-transform: uppercase; letter-spacing: .5px; }
+  .shadow td { opacity: .55; }
+  details summary { cursor: pointer; color: var(--dim); }
+  /* All-Rules grouped view */
+  label.primary { display: flex; align-items: center; gap: 7px; color: var(--dim);
+    font-size: 13px; }
+  select.big { font-size: 14px; padding: 7px 11px; min-width: 210px; color: var(--ink); }
+  .addbar { display: flex; gap: 8px; align-items: center; margin-bottom: 16px;
+    padding: 10px 12px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; }
+  .addbar .addlabel { color: var(--dim); font-size: 12px; text-transform: uppercase;
+    letter-spacing: .5px; }
+  .addbar input { flex: 1; }
+  details.grp { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px;
+    background: var(--panel); overflow: hidden; }
+  details.grp > summary { list-style: none; cursor: pointer; padding: 10px 13px;
+    display: flex; align-items: center; gap: 12px; color: var(--ink); }
+  details.grp > summary::-webkit-details-marker { display: none; }
+  details.grp > summary::before { content: "▸"; color: var(--dim); font-size: 11px; }
+  details.grp[open] > summary::before { content: "▾"; }
+  details.grp[open] > summary { border-bottom: 1px solid var(--line); background: var(--panel2); }
+  .g-proj { color: var(--accent); font-weight: 600; }
+  .g-scope { color: var(--dim); font-size: 12px; }
+  .g-count { color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 20px; padding: 0 9px; font-size: 12px; }
+  .g-file { color: var(--dim); font-size: 11px; margin-left: auto; word-break: break-all; }
+  details.grp table { width: 100%; }
+  details.grp td { border-bottom: 1px solid var(--line); }
+  details.grp tr:last-child td { border-bottom: none; }
+  td.c-type { width: 64px; }
+  td.actions { width: 1%; }
+  /* staging / pending changes */
+  .pendingbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+    background: var(--panel2); border-top: 2px solid var(--accent);
+    padding: 11px 22px; display: none; align-items: center; gap: 16px;
+    box-shadow: 0 -6px 20px rgba(0,0,0,.4); }
+  .pendingbar.show { display: flex; }
+  .pendingbar .pc { color: var(--accent); font-weight: 600; }
+  .pendingbar .apply { border-color: var(--accent); color: var(--accent); font-weight: 600;
+    padding: 7px 16px; }
+  .pendingbar .apply:hover { background: var(--accent); color: #14110f; }
+  .pendtag { color: var(--accent); font-size: 12px; font-weight: 600; margin-right: 6px; }
+  tr.pend-del td { opacity: .45; text-decoration: line-through; }
+  tr.pend td { background: rgba(217,138,75,.10); }
+  .rk-badge { display: inline-block; padding: 1px 10px; border-radius: 20px;
+    border: 1px solid; font-size: 12px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .5px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Claude Settings <span class="dot">●</span> Manager</h1>
+  <span class="meta" id="meta">loading…</span>
+  <span class="meta" style="margin-left:auto"><button onclick="load()">↻ rescan</button></span>
+</header>
+<div class="tabs">
+  <div class="tab active" data-tab="all">All Rules <span class="badge" id="cnt-all"></span></div>
+  <div class="tab" data-tab="project">By Project</div>
+  <div class="tab" data-tab="risk">⚠ Risk <span class="badge" id="cnt-risk"></span></div>
+  <div class="tab" data-tab="sugg">Suggestions <span class="badge" id="cnt-sugg"></span></div>
+</div>
+<main id="main"></main>
+<div class="toast" id="toast"></div>
+<div class="pendingbar" id="pendingbar"></div>
+
+<script>
+let STATE = { files: [], rules: [], suggestions: [], risks: [], scopes: {}, root: "" };
+let TAB = "all";
+let focusQ = false;
+let PENDING = [];        // staged changes — NOTHING is written until Apply
+let UID = 0;
+const F = { q: "", type: "", scope: "", project: "" };
+
+const $ = (s, el=document) => el.querySelector(s);
+const esc = s => (s ?? "").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function load() {
+  const r = await fetch("/api/scan");
+  STATE = await r.json();
+  $("#meta").textContent = `${STATE.files.length} files · ${STATE.rules.length} rules · root ${STATE.root}`;
+  $("#cnt-all").textContent = STATE.rules.length;
+  const hi = STATE.suggestions.filter(s => s.severity === "high").length;
+  $("#cnt-sugg").textContent = STATE.suggestions.length + (hi ? ` (${hi}!)` : "");
+  const autorun = STATE.risks.filter(r => r.type === "allow").length;
+  const sev = STATE.risks.filter(r => r.type === "allow" && (r.severity==="critical"||r.severity==="high")).length;
+  $("#cnt-risk").textContent = autorun + (sev ? ` (${sev}!)` : "");
+  render();
+}
+
+function toast(msg, err) {
+  const t = $("#toast"); t.textContent = msg;
+  t.className = "toast show" + (err ? " err" : "");
+  setTimeout(() => t.className = "toast", 3200);
+}
+
+document.querySelectorAll(".tab").forEach(t =>
+  t.onclick = () => { TAB = t.dataset.tab;
+    document.querySelectorAll(".tab").forEach(x => x.classList.toggle("active", x===t));
+    render(); });
+
+function render() {
+  if (TAB === "all") renderAll();
+  else if (TAB === "project") renderProject();
+  else if (TAB === "risk") renderRisk();
+  else renderSugg();
+  renderPending();
+}
+
+// ---------- Staging: nothing is written until Apply ----------
+function fileLabel(path){ const f=STATE.files.find(x=>x.path===path); return f?`${f.project} · ${f.scope}`:path; }
+function pendingFor(id){ return PENDING.find(p=>p.ruleId===id); }
+function stage(op){ op.uid="u"+(++UID); if(op.ruleId!=null) PENDING=PENDING.filter(p=>p.ruleId!==op.ruleId); PENDING.push(op); render(); }
+function unstage(uid){ PENDING=PENDING.filter(p=>p.uid!==uid); render(); }
+function discardPending(){ if(PENDING.length && confirm(`Discard all ${PENDING.length} pending change(s)?`)){ PENDING=[]; render(); } }
+
+function actionCell(r){
+  const p=pendingFor(r.id);
+  if(p){
+    const tag = p.kind==="delete"?"will delete"
+      : p.kind==="change-type"?`→ ${p.new_type}`
+      : p.kind==="move"?`→ ${fileLabel(p.to)}` : "pending";
+    return `<span class="pendtag">${esc(tag)}</span> <button onclick="unstage('${p.uid}')">undo</button>`;
+  }
+  return `<select title="change type" onchange="chType(${r.id}, this.value)">
+      ${["allow","ask","deny"].map(t=>`<option ${t===r.type?"selected":""}>${t}</option>`).join("")}
+    </select>
+    <select title="move to file" onchange="mv(${r.id}, this.value); this.value=''">
+      <option value="">move…</option>${fileOptions(r.file)}
+    </select>
+    <button class="danger" title="delete" onclick="del(${r.id})">✕</button>`;
+}
+function rowClass(r){ const p=pendingFor(r.id); return p?(p.kind==="delete"?"pend-del":"pend"):""; }
+
+function renderPending(){
+  const b=$("#pendingbar");
+  if(!PENDING.length){ b.className="pendingbar"; b.innerHTML=""; return; }
+  b.className="pendingbar show";
+  b.innerHTML=`<span class="pc">${PENDING.length} pending change${PENDING.length>1?"s":""} — not yet written</span>
+    <button class="apply" onclick="applyAll()">Review &amp; Apply…</button>
+    <button onclick="discardPending()">Discard</button>`;
+}
+
+async function applyAll(){
+  if(!PENDING.length) return;
+  const summary = PENDING.map(p=>" • "+p.label).join("\n");
+  if(!confirm(`Apply ${PENDING.length} change(s)?\n\nThis writes to your settings files (a timestamped backup of each is saved first).\n\n${summary}`)) return;
+  const ops = PENDING.map(({uid,ruleId,...op})=>op);
+  const r = await fetch("/api/apply",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ops})});
+  const j = await r.json();
+  if(j.ok){ toast(`applied ${ops.length} change(s) — backups saved`); }
+  else { const bad=(j.results||[]).filter(x=>!x.ok); toast(`${bad.length} change(s) failed: ${bad.map(b=>b.error).join("; ")}`, true); }
+  PENDING=[]; await load();
+}
+
+// ---------- All Rules ----------
+function projects() {
+  return [...new Set(STATE.rules.map(r => r.project))].sort();
+}
+function fileOptions(exclude) {
+  return STATE.files.filter(f => f.path !== exclude)
+    .map(f => `<option value="${esc(f.path)}">${esc(f.scope)} · ${esc(f.project)}</option>`).join("");
+}
+
+const TYPE_ORDER = { deny: 0, ask: 1, allow: 2 };
+
+function rowHtml(r) {
+  return `<tr class="${rowClass(r)}">
+    <td class="c-type"><span class="pill t-${r.type}">${r.type}</span></td>
+    <td class="raw"><span class="tool">${esc(r.tool)}</span>${r.pattern!=null?"("+esc(r.pattern)+")":""}</td>
+    <td class="actions">${actionCell(r)}</td></tr>`;
+}
+
+function renderAll() {
+  const typeOpt = ["", "allow", "ask", "deny"].map(t =>
+    `<option value="${t}" ${F.type===t?"selected":""}>${t||"all types"}</option>`).join("");
+  const scopeOpt = ["", ...Object.keys(STATE.scopes)].map(s =>
+    `<option value="${s}" ${F.scope===s?"selected":""}>${s?esc(STATE.scopes[s].label):"all scopes"}</option>`).join("");
+  const projOpt = ["", ...projects()].map(p =>
+    `<option value="${esc(p)}" ${F.project===p?"selected":""}>${p?esc(p):"All projects"}</option>`).join("");
+
+  const rows = STATE.rules.filter(r =>
+    (!F.q || r.raw.toLowerCase().includes(F.q.toLowerCase())) &&
+    (!F.type || r.type===F.type) && (!F.scope || r.scope===F.scope) &&
+    (!F.project || r.project===F.project));
+
+  // group filtered rules by file; order: global first, then projects A→Z (shared before local)
+  const fileOrder = [...STATE.files].sort((a,b) =>
+    (a.project==="(global)"?0:1) - (b.project==="(global)"?0:1) ||
+    a.project.localeCompare(b.project) ||
+    (b.scope==="project-shared") - (a.scope==="project-shared"));
+
+  // collapse by default; auto-expand when narrowed by project or search
+  const expand = F.project !== "" || F.q !== "";
+
+  let groups = "";
+  for (const f of fileOrder) {
+    const frows = rows.filter(r => r.file === f.path).sort((a,b) =>
+      TYPE_ORDER[a.type]-TYPE_ORDER[b.type] ||
+      a.tool.localeCompare(b.tool) || (a.pattern||"").localeCompare(b.pattern||""));
+    if (!frows.length) continue;
+    groups += `<details class="grp" ${expand?"open":""}>
+      <summary>
+        <span class="g-proj">${esc(f.project)}</span>
+        <span class="g-scope">${esc(STATE.scopes[f.scope].label)}</span>
+        <span class="g-count">${frows.length}</span>
+        <span class="g-file">${esc(f.path)}</span>
+      </summary>
+      <table><tbody>${frows.map(rowHtml).join("")}</tbody></table>
+    </details>`;
+  }
+
+  $("#main").innerHTML = `
+    <div class="controls">
+      <label class="primary">Project <select id="fp" class="big">${projOpt}</select></label>
+      <input type="text" id="q" placeholder="search rule…" value="${esc(F.q)}">
+      <select id="ft">${typeOpt}</select>
+      <select id="fs">${scopeOpt}</select>
+      <span class="count">${rows.length} rule${rows.length!==1?"s":""}${F.project||F.q||F.type||F.scope?" matching":""}</span>
+    </div>
+    <div class="addbar">
+      <span class="addlabel">add rule</span>
+      <input type="text" id="newraw" placeholder="e.g. Bash(npm run:*)">
+      <select id="newtype"><option>allow</option><option>ask</option><option>deny</option></select>
+      <select id="newfile">${fileOptions("")}</select>
+      <button onclick="addRule()">+ add</button>
+    </div>
+    ${groups || `<div class="empty">no rules match</div>`}`;
+
+  $("#fp").onchange = e => { F.project=e.target.value; renderAll(); };
+  $("#ft").onchange = e => { F.type=e.target.value; renderAll(); };
+  $("#fs").onchange = e => { F.scope=e.target.value; renderAll(); };
+  $("#q").oninput = e => { F.q = e.target.value; focusQ = true; renderAll(); };
+  if (focusQ) { $("#q").focus(); $("#q").setSelectionRange(F.q.length, F.q.length); focusQ = false; }
+}
+
+function rById(id){ return STATE.rules.find(r=>r.id===id); }
+function del(id){ const r=rById(id); if(!r)return;
+  stage({kind:"delete",ruleId:id,file:r.file,type:r.type,raw:r.raw,label:`delete ${r.type} ${r.raw} @ ${r.project}`}); }
+function chType(id,nt){ const r=rById(id); if(!r)return;
+  if(nt===r.type){ PENDING=PENDING.filter(p=>p.ruleId!==id); render(); return; }
+  stage({kind:"change-type",ruleId:id,file:r.file,type:r.type,new_type:nt,raw:r.raw,label:`${r.raw}: ${r.type} → ${nt} @ ${r.project}`}); }
+function mv(id,to){ if(!to)return; const r=rById(id); if(!r)return;
+  stage({kind:"move",ruleId:id,from:r.file,to,type:r.type,raw:r.raw,label:`move ${r.raw}: ${fileLabel(r.file)} → ${fileLabel(to)}`}); }
+function addRule(){ const raw=$("#newraw").value.trim(); if(!raw) return toast("enter a rule",true);
+  const file=$("#newfile").value, type=$("#newtype").value;
+  stage({kind:"add",file,type,raw,label:`add ${type} ${raw} → ${fileLabel(file)}`}); $("#newraw").value=""; }
+
+// ---------- By Project (effective merge) ----------
+const PF = { project: "", q: "" };  // filters for this tab
+
+function renderProject() {
+  const projs = projects().filter(p => !p.startsWith("("));
+  const globals = STATE.rules.filter(r => r.scope.startsWith("user"));
+  const ord = {deny:0, ask:1, allow:2};
+  const shown = PF.project ? projs.filter(p => p === PF.project) : projs;
+
+  const projOpt = ["", ...projs].map(p =>
+    `<option value="${esc(p)}" ${PF.project===p?"selected":""}>${p?esc(p):"All projects"}</option>`).join("");
+
+  let html = `
+    <div class="controls">
+      <label class="primary">Project <select id="pp" class="big">${projOpt}</select></label>
+      <input type="text" id="pq" placeholder="how does a rule apply? e.g. WebSearch" value="${esc(PF.q)}">
+      <span class="count">Effective rules each project sees = its own + all global rules,
+        evaluated deny→ask→allow. Greyed = shadowed by a broader same-type rule.</span>
+    </div>`;
+
+  let any = false;
+  for (const p of shown) {
+    const own = STATE.rules.filter(r => r.project === p);
+    const all = [...own, ...globals].sort((a,b)=>
+      ord[a.type]-ord[b.type] || a.tool.localeCompare(b.tool) || (a.pattern||"").localeCompare(b.pattern||""));
+    const visible = PF.q ? all.filter(r => r.raw.toLowerCase().includes(PF.q.toLowerCase())) : all;
+    if (PF.q && !visible.length) continue;   // hide projects with no match when searching
+    any = true;
+    const rows = visible.map(r => {
+      const shadow = all.some(s => s!==r && s.type===r.type && s.tool===r.tool &&
+        s.pattern!==r.pattern && covers(s.pattern, r.pattern));
+      const src = r.scope.startsWith("user") ? "global" : "this project";
+      return `<tr class="${shadow?"shadow":""}">
+        <td class="c-type"><span class="pill t-${r.type}">${r.type}</span></td>
+        <td class="raw"><span class="tool">${esc(r.tool)}</span>${r.pattern!=null?"("+esc(r.pattern)+")":""}</td>
+        <td class="scope">${esc(r.scope_label)} <span style="opacity:.6">(${src})</span></td>
+        <td>${shadow?'<span class="scope">↑ redundant</span>':''}</td>
+      </tr>`;
+    }).join("");
+    html += `<div class="proj-head">${esc(p)} — ${own.length} own + ${globals.length} global${PF.q?` · ${visible.length} match`:""}</div>
+      <table><thead><tr><th>Type</th><th>Rule</th><th>From scope</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+  }
+  if (!any) html += `<div class="empty">${PF.q?`no rule matching "${esc(PF.q)}" applies to ${PF.project||"any project"}`:"no project settings found"}</div>`;
+  $("#main").innerHTML = html;
+
+  $("#pp").onchange = e => { PF.project=e.target.value; renderProject(); };
+  $("#pq").oninput = e => { PF.q=e.target.value; focusQ=true; renderProject(); };
+  if (focusQ) { $("#pq").focus(); $("#pq").setSelectionRange(PF.q.length, PF.q.length); focusQ=false; }
+}
+function covers(broad, narrow){
+  if (broad==null) return true;
+  if (narrow==null) return false;
+  if (broad===narrow) return true;
+  if (broad.endsWith("/**")){ const p=broad.slice(0,-3); return narrow===p||narrow.startsWith(p+"/"); }
+  if (broad.endsWith(":*")){ const p=broad.slice(0,-2); return narrow===p||narrow.startsWith(p+" ")||narrow.startsWith(p+":"); }
+  if (broad.endsWith("*")) return narrow.startsWith(broad.slice(0,-1));
+  return false;
+}
+
+// ---------- Suggestions ----------
+function renderSugg() {
+  if (!STATE.suggestions.length) { $("#main").innerHTML = `<div class="empty">✓ nothing to clean up</div>`; return; }
+  const html = STATE.suggestions.map(s => {
+    const ids = s.rule_ids || [];
+    const fix = s.fix || {};
+    let action = "";
+    if (s.kind === "promote-to-global") {
+      action = `<button onclick='promote(${JSON.stringify(ids)})'>promote to global &amp; remove ${ids.length} copies</button>`;
+    } else if (s.kind === "duplicate-in-file") {
+      action = `<button class="danger" onclick="del(${ids[1]})">remove the duplicate</button>`;
+    } else if (s.kind === "shadowed") {
+      action = `<button class="danger" onclick="del(${ids[0]})">remove redundant rule</button>`;
+    } else if (s.kind === "conflict") {
+      const rm = fix.remove_ids || [];
+      action = rm.length ? `<button class="danger" onclick='stageDeletes(${JSON.stringify(rm)})'>remove the dead entr${rm.length>1?"ies":"y"} (${rm.length})</button>` : "";
+    } else if (s.kind === "overridden-allow") {
+      action = `<button class="danger" onclick="del(${fix.dead_allow})">remove the dead allow</button>
+        <button onclick="del(${fix.overrider})">remove the overriding rule instead</button>`;
+    } else if (s.kind === "ask-redundant") {
+      action = `<button class="danger" onclick='stageDeletes(${JSON.stringify(ids)})'>stage removal of all ${ids.length}</button>`;
+    }
+    // ask-guardrail & local-only are informational (no action)
+    const list = (ids.length && ids.length<=60) ? `<details><summary>${ids.length} affected rule(s)</summary>${
+      ids.map(i=>{const r=rById(i); return r?`<div class="filepath">${esc(r.type)} ${esc(r.raw)} — ${esc(r.file)}</div>`:""}).join("")
+    }</details>` : ids.length ? `<div class="count">${ids.length} affected rules</div>` : "";
+    return `<div class="card">
+      <div class="sev sev-${s.severity}">${s.severity}</div>
+      <h3>${esc(s.title)}</h3>
+      <div class="d">${esc(s.detail)}</div>
+      ${list}
+      <div style="margin-top:8px">${action}</div>
+    </div>`;
+  }).join("");
+  $("#main").innerHTML = html;
+}
+
+function stageDeletes(ids) {
+  let n=0;
+  ids.forEach(id => { const r=rById(id);
+    if(r && !pendingFor(id)){ PENDING.push({uid:"u"+(++UID),kind:"delete",ruleId:id,
+      file:r.file,type:r.type,raw:r.raw,label:`delete ${r.type} ${r.raw} @ ${r.project}`}); n++; }});
+  toast(`staged ${n} removal(s) — review & Apply`); render();
+}
+
+function promote(ids) {
+  const rs = ids.map(rById).filter(Boolean);
+  if (!rs.length) return;
+  const raw = rs[0].raw, type = rs[0].type;
+  const globalFile = (STATE.files.find(f=>f.scope==="user")||{}).path;
+  if (!globalFile) return toast("no global settings.json found", true);
+  // stage: one add to global + a delete of each project copy
+  stage({kind:"add",file:globalFile,type,raw,label:`add ${type} ${raw} → global`});
+  rs.forEach(r => stage({kind:"delete",ruleId:r.id,file:r.file,type:r.type,raw:r.raw,
+    label:`delete ${r.raw} @ ${r.project}`}));
+  toast(`staged ${rs.length+1} changes — review & Apply`);
+}
+
+// ---------- Risk (what can auto-run, and could it hurt?) ----------
+const RK = { showAsk: false };
+const SEV_META = {
+  critical: {label:"Critical", color:"var(--deny)"},
+  high:     {label:"High",     color:"var(--ask)"},
+  medium:   {label:"Medium",   color:"var(--info)"},
+  low:      {label:"Low",      color:"var(--low)"},
+};
+
+function riskActionCell(r){
+  const p=pendingFor(r.id);
+  if(p){
+    const tag = p.kind==="delete"?"will delete":p.kind==="change-type"?`→ ${p.new_type}`:"pending";
+    return `<span class="pendtag">${esc(tag)}</span> <button onclick="unstage('${p.uid}')">undo</button>`;
+  }
+  return `${r.type==="allow"?`<button onclick="chType(${r.id},'ask')" title="require a prompt">require approval</button>`:""}
+    <button class="danger" onclick="chType(${r.id},'deny')" title="block entirely">block</button>
+    <button class="danger" onclick="del(${r.id})" title="delete rule">✕</button>`;
+}
+
+function renderRisk(){
+  const items = STATE.risks.filter(r => RK.showAsk ? true : r.type==="allow");
+  const autorun = STATE.risks.filter(r=>r.type==="allow").length;
+  const sev = STATE.risks.filter(r=>r.type==="allow" && (r.severity==="critical"||r.severity==="high")).length;
+
+  let body="";
+  for (const s of ["critical","high","medium","low"]) {
+    const g = items.filter(r=>r.severity===s);
+    if(!g.length) continue;
+    const m = SEV_META[s];
+    const open = s!=="low";
+    const rows = g.map(r=>`<tr class="${rowClass(r)}">
+      <td class="raw"><span class="tool">${esc(r.tool)}</span>${r.pattern!=null?"("+esc(r.pattern)+")":""}</td>
+      <td><span class="pill t-${r.type}">${r.type}</span></td>
+      <td class="scope">${esc(r.why)}</td>
+      <td>${esc(r.project)}</td>
+      <td class="actions">${riskActionCell(r)}</td></tr>`).join("");
+    body += `<details class="grp" ${open?"open":""}>
+      <summary>
+        <span class="rk-badge" style="border-color:${m.color};color:${m.color}">${m.label}</span>
+        <span class="g-count">${g.length}</span>
+        <span class="g-scope">${s==="low"?"low impact / mostly read-only":""}</span>
+      </summary>
+      <table><thead><tr><th>Command / rule</th><th>Mode</th><th>Why it's flagged</th><th>Project</th><th>Tighten</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+    </details>`;
+  }
+
+  $("#main").innerHTML = `
+    <div class="controls">
+      <span class="count"><b style="color:var(--accent)">${autorun}</b> capabilities run WITHOUT a prompt${sev?` · <b style="color:var(--deny)">${sev} critical/high</b>`:""}.
+        Tighten with “require approval” (→ ask) or “block” (→ deny).</span>
+      <label class="primary" style="margin-left:auto"><input type="checkbox" id="rkask" ${RK.showAsk?"checked":""}>&nbsp;also show items already set to “ask”</label>
+    </div>
+    ${body || `<div class="empty">✓ nothing risky is auto-allowed</div>`}`;
+
+  $("#rkask").onchange = e => { RK.showAsk=e.target.checked; renderRisk(); renderPending(); };
+}
+
+load();
+</script>
+</body>
+</html>

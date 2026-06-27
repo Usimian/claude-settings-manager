@@ -1,0 +1,12 @@
+# Backups created on every write
+*.bak-*
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
