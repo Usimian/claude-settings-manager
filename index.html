@@ -111,6 +111,32 @@
   .rk-badge { display: inline-block; padding: 1px 10px; border-radius: 20px;
     border: 1px solid; font-size: 12px; font-weight: 700; text-transform: uppercase;
     letter-spacing: .5px; }
+  /* Memories */
+  .memlist { padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+  .memcard { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--bg); }
+  .memcard.pend { background: rgba(217,138,75,.10); }
+  .memcard.pend-del { opacity: .5; }
+  .memhead { display: flex; align-items: center; gap: 10px; }
+  .memname { font-weight: 600; color: var(--ink); word-break: break-all; }
+  .memact { margin-left: auto; display: flex; gap: 6px; white-space: nowrap; }
+  .memact button { padding: 3px 9px; font-size: 12px; }
+  .memdesc { color: var(--dim); font-size: 13px; margin: 5px 0; }
+  .membody { white-space: pre-wrap; word-break: break-word; background: var(--panel2);
+    border: 1px solid var(--line); border-radius: 6px; padding: 10px; font-size: 12.5px;
+    color: var(--ink); margin: 6px 0; max-height: 440px; overflow: auto; }
+  .memlinks { font-size: 12px; color: var(--dim); }
+  .memlink { color: var(--accent); }
+  .pill.memtype-user { color: var(--accent); border: 1px solid var(--accent); }
+  .pill.memtype-feedback { color: var(--ask); border: 1px solid var(--ask); }
+  .pill.memtype-project { color: var(--info); border: 1px solid var(--info); }
+  .pill.memtype-reference { color: var(--low); border: 1px solid var(--low); }
+  .memeditor { margin-top: 8px; padding: 11px; border: 1px dashed var(--accent);
+    border-radius: 8px; display: flex; flex-direction: column; gap: 9px; }
+  .memeditor .mfield { display: flex; flex-direction: column; gap: 3px; }
+  .memeditor label { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--dim); }
+  .memeditor textarea { font: inherit; background: var(--panel2); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 8px; width: 100%; resize: vertical; }
+  .memeditor input { width: 100%; }
 </style>
 </head>
 <body>
@@ -124,18 +150,21 @@
   <div class="tab" data-tab="project">By Project</div>
   <div class="tab" data-tab="risk">⚠ Risk <span class="badge" id="cnt-risk"></span></div>
   <div class="tab" data-tab="sugg">Suggestions <span class="badge" id="cnt-sugg"></span></div>
+  <div class="tab" data-tab="mem">🧠 Memories <span class="badge" id="cnt-mem"></span></div>
 </div>
 <main id="main"></main>
 <div class="toast" id="toast"></div>
 <div class="pendingbar" id="pendingbar"></div>
 
 <script>
-let STATE = { files: [], rules: [], suggestions: [], risks: [], scopes: {}, root: "" };
+let STATE = { files: [], rules: [], suggestions: [], risks: [], memories: null, memTypes: [], scopes: {}, root: "" };
 let TAB = "all";
 let focusQ = false;
 let PENDING = [];        // staged changes — NOTHING is written until Apply
 let UID = 0;
+let EDITING = null;      // id of the memory whose inline editor is open
 const F = { q: "", type: "", scope: "", project: "" };
+const MF = { scope: "", type: "", q: "" };   // Memories tab filters
 
 const $ = (s, el=document) => el.querySelector(s);
 const esc = s => (s ?? "").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -168,8 +197,16 @@ function render() {
   if (TAB === "all") renderAll();
   else if (TAB === "project") renderProject();
   else if (TAB === "risk") renderRisk();
+  else if (TAB === "mem") renderMem();
   else renderSugg();
   renderPending();
+}
+
+async function loadMemories(){
+  const r = await fetch("/api/memories");
+  const j = await r.json();
+  STATE.memories = j.memories; STATE.memTypes = j.memTypes;
+  $("#cnt-mem").textContent = j.memories.length;
 }
 
 // ---------- Staging: nothing is written until Apply ----------
@@ -215,7 +252,8 @@ async function applyAll(){
   const j = await r.json();
   if(j.ok){ toast(`applied ${ops.length} change(s) — backups saved`); }
   else { const bad=(j.results||[]).filter(x=>!x.ok); toast(`${bad.length} change(s) failed: ${bad.map(b=>b.error).join("; ")}`, true); }
-  PENDING=[]; await load();
+  PENDING=[]; EDITING=null; STATE.memories=null;   // force memory refetch if touched
+  await load();
 }
 
 // ---------- All Rules ----------
@@ -427,6 +465,93 @@ function promote(ids) {
   rs.forEach(r => stage({kind:"delete",ruleId:r.id,file:r.file,type:r.type,raw:r.raw,
     label:`delete ${r.raw} @ ${r.project}`}));
   toast(`staged ${rs.length+1} changes — review & Apply`);
+}
+
+// ---------- Memories (view + staged edit) ----------
+function memById(id){ return (STATE.memories||[]).find(m=>m.id===id); }
+function openEdit(id){ EDITING=id; render(); }
+function cancelEdit(){ EDITING=null; render(); }
+function delMem(id){ const m=memById(id); if(!m)return;
+  stage({kind:"mem-delete",ruleId:id,file:m.file,label:`delete memory "${m.name}" @ ${m.scope}`}); }
+function stageMemEdit(id){ const m=memById(id); if(!m)return;
+  const op={kind:"mem-edit",ruleId:id,file:m.file,label:`edit memory "${m.name}" @ ${m.scope}`};
+  let changed=false;
+  const nt=$("#med-type").value, nd=$("#med-desc").value, nb=$("#med-body").value;
+  if(nt!==m.type){op.type=nt;changed=true;}
+  if(nd!==m.description){op.description=nd;changed=true;}
+  if(nb!==m.body){op.body=nb;changed=true;}
+  EDITING=null;
+  if(!changed){ toast("no changes to stage"); render(); return; }
+  stage(op);
+}
+
+function memCard(m){
+  const p=pendingFor(m.id), editing=EDITING===m.id;
+  let actions;
+  if(p) actions=`<span class="pendtag">${p.kind==="mem-delete"?"will delete":"edited"}</span> <button onclick="unstage('${p.uid}')">undo</button>`;
+  else if(editing) actions="";
+  else actions=`<button onclick="openEdit('${m.id}')">edit</button> <button class="danger" onclick="delMem('${m.id}')" title="delete">🗑</button>`;
+
+  const linkstr = m.links.length?`<div class="memlinks">→ ${m.links.map(l=>`<span class="memlink">[[${esc(l)}]]</span>`).join(" ")}</div>`:"";
+  const bodyHtml = `<details><summary>body${m.links.length?` · ${m.links.length} link(s)`:""}</summary>
+     <pre class="membody">${esc(m.body)}</pre>${linkstr}</details>`;
+  const editor = editing ? `
+    <div class="memeditor">
+      <div class="mfield"><label>type</label>
+        <select id="med-type">${["user","feedback","project","reference"].map(t=>`<option ${t===m.type?"selected":""}>${t}</option>`).join("")}</select></div>
+      <div class="mfield"><label>description</label><input id="med-desc" value="${esc(m.description)}"></div>
+      <div class="mfield"><label>body (markdown)</label><textarea id="med-body" rows="12">${esc(m.body)}</textarea></div>
+      <div><button class="apply" onclick="stageMemEdit('${m.id}')">stage changes</button>
+        <button onclick="cancelEdit()">cancel</button></div>
+    </div>` : "";
+
+  return `<div class="memcard ${p?(p.kind==="mem-delete"?"pend-del":"pend"):""}">
+    <div class="memhead">
+      <span class="memname">${esc(m.name)}</span>
+      <span class="pill memtype-${esc(m.type)}">${esc(m.type)}</span>
+      <span class="memact">${actions}</span>
+    </div>
+    <div class="memdesc">${esc(m.description)}</div>
+    ${bodyHtml}${editor}
+  </div>`;
+}
+
+function renderMem(){
+  if(!STATE.memories){ $("#main").innerHTML=`<div class="empty">loading memories…</div>`; loadMemories().then(render); return; }
+  const mems=STATE.memories;
+  const scopes=[...new Set(mems.map(m=>m.scope))].sort((a,b)=>
+    (a==="global"?0:1)-(b==="global"?0:1) || a.localeCompare(b));
+  const scopeOpt=["",...scopes].map(s=>`<option value="${esc(s)}" ${MF.scope===s?"selected":""}>${s?esc(s):"All scopes"}</option>`).join("");
+  const typeOpt=["","user","feedback","project","reference"].map(t=>`<option value="${esc(t)}" ${MF.type===t?"selected":""}>${t?esc(t):"All types"}</option>`).join("");
+
+  const match=m=> (!MF.scope||m.scope===MF.scope) && (!MF.type||m.type===MF.type) &&
+    (!MF.q || (m.name+" "+m.description+" "+m.body).toLowerCase().includes(MF.q.toLowerCase()));
+  const shown=mems.filter(match);
+
+  let body="";
+  for(const sc of scopes){
+    const items=shown.filter(m=>m.scope===sc);
+    if(!items.length) continue;
+    const open = MF.scope!=="" || MF.q!=="" || items.some(m=>m.id===EDITING||pendingFor(m.id));
+    body+=`<details class="grp" ${open?"open":""}>
+      <summary><span class="g-proj">🧠 ${esc(sc)}</span><span class="g-count">${items.length}</span></summary>
+      <div class="memlist">${items.map(memCard).join("")}</div>
+    </details>`;
+  }
+
+  $("#main").innerHTML=`
+    <div class="controls">
+      <label class="primary">Scope <select id="ms" class="big">${scopeOpt}</select></label>
+      <select id="mt">${typeOpt}</select>
+      <input type="text" id="mq" placeholder="search name / description / body…" value="${esc(MF.q)}">
+      <span class="count">${shown.length} of ${mems.length} memories</span>
+    </div>
+    ${body||`<div class="empty">no memories match</div>`}`;
+
+  $("#ms").onchange=e=>{MF.scope=e.target.value;renderMem();};
+  $("#mt").onchange=e=>{MF.type=e.target.value;renderMem();};
+  $("#mq").oninput=e=>{MF.q=e.target.value;focusQ=true;renderMem();};
+  if(focusQ){const el=$("#mq"); if(el){el.focus();el.setSelectionRange(MF.q.length,MF.q.length);} focusQ=false;}
 }
 
 // ---------- Risk (what can auto-run, and could it hurt?) ----------

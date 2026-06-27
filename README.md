@@ -50,6 +50,9 @@ Automated cleanup, each with a one-click (staged) fix:
 - **ask labels** — every `ask` rule tagged as an active **guardrail** (it overrides an `allow`) or **redundant** under the default mode.
 - **local-only** — rules that live only in `*.local.json` (personal, not shared).
 
+### 🧠 Memories
+Browse and edit Claude Code's [auto-memory](https://code.claude.com/docs/en/memory) files across every scope (your global `~/.claude/projects/.../memory/` and each project's). Filter by scope, type (`user`/`feedback`/`project`/`reference`), or full-text search; expand to read the body and follow `[[links]]`. Edit description/type/body inline or delete — staged like everything else, and a delete also removes the matching line from that scope's `MEMORY.md` index.
+
 ---
 
 ## How Claude Code permissions actually work
@@ -85,6 +88,32 @@ Permission **rule arrays** are unioned across all files, then evaluated `deny �
 - `index.html` — a single-page vanilla-JS frontend (no framework, no bundler).
 
 No telemetry, no network calls, no external services.
+
+---
+
+## Security model & limitations
+
+The server **binds to `127.0.0.1` only** and is meant for a single local user. Within that boundary it still defends itself:
+
+- **Writes are confined to the scanned root** — an op targeting a path outside it is refused (no writing to `/etc/...`).
+- **Cross-origin and DNS-rebinding protection** — POSTs with a foreign `Origin`, or requests with a non-localhost `Host`, are rejected (403), so a malicious web page in your browser can't drive the server.
+- **Rule types are validated** (`allow`/`ask`/`deny` only) and backups are uniquely named.
+
+Known limitations, by design:
+
+- **The danger classifier is a heuristic denylist**, not a security guarantee. It flags *known* risky command patterns; a novel or deliberately obfuscated command (e.g. a dangerous payload hidden inside `bash -c "…"`) may show as benign. Use it as a spotlight, not a sandbox.
+- It serves only the single self-contained `index.html` (no static-file server), so a favicon request 404s — harmless.
+- No authentication beyond the localhost/origin checks above: anyone who can reach `127.0.0.1` on your machine can use it.
+
+---
+
+## Testing
+
+A zero-dependency test suite covers parsing, discovery, the coverage/danger/suggestion logic, every write path (with backups + key preservation), and the full memory lifecycle:
+
+```bash
+python3 test_app.py            # 33 tests, stdlib unittest only
+```
 
 ---
 

@@ -87,9 +87,10 @@ def _find_project_claude_dirs(root: Path, max_depth: int = 3):
         if depth >= max_depth:
             dirnames[:] = []
             continue
-        # prune
-        dirnames[:] = [d for d in dirnames if d not in PRUNE and not d.startswith(".")
-                       or d == ".claude"]
+        # Keep .claude (we look for it by name just below) plus ordinary,
+        # non-hidden, non-heavy dirs. Parenthesised so the intent is unambiguous.
+        dirnames[:] = [d for d in dirnames
+                       if d == ".claude" or (d not in PRUNE and not d.startswith("."))]
         if ".claude" in dirnames:
             cd = Path(dirpath) / ".claude"
             # skip the user-global one (handled above)
@@ -133,9 +134,16 @@ def collect_rules(files):
         data = load_json(fmeta["path"])
         if not data:
             continue
-        perms = data.get("permissions") or {}
+        perms = data.get("permissions")
+        if not isinstance(perms, dict):
+            continue
         for rtype in RULE_TYPES:
-            for raw in perms.get(rtype, []) or []:
+            arr = perms.get(rtype)
+            if not isinstance(arr, list):
+                continue
+            for raw in arr:
+                if not isinstance(raw, str):
+                    continue
                 tool, pattern = parse_rule(raw)
                 rules.append({
                     "id": rid,
@@ -545,7 +553,13 @@ def build_suggestions(rules):
 # Writes (with backup, preserving non-permission keys)
 # --------------------------------------------------------------------------- #
 def _backup(path: str):
-    bak = f"{path}.bak-{time.strftime('%Y%m%d-%H%M%S')}"
+    # Guarantee a unique name: two ops on the same file within one second (common
+    # in a batch Apply) must NOT clobber each other's backups.
+    base = f"{path}.bak-{time.strftime('%Y%m%d-%H%M%S')}"
+    bak, n = base, 1
+    while os.path.exists(bak):
+        bak = f"{base}-{n}"
+        n += 1
     shutil.copy2(path, bak)
     return bak
 
@@ -562,6 +576,8 @@ def _ensure_perms(data: dict, rtype: str):
 
 
 def remove_rule(path: str, rtype: str, raw: str):
+    if rtype not in RULE_TYPES:
+        return False, f"invalid rule type: {rtype}"
     data = load_json(path) or {}
     arr = (data.get("permissions") or {}).get(rtype, [])
     if raw not in arr:
@@ -574,6 +590,8 @@ def remove_rule(path: str, rtype: str, raw: str):
 
 
 def add_rule(path: str, rtype: str, raw: str):
+    if rtype not in RULE_TYPES:
+        return False, f"invalid rule type: {rtype}"
     data = load_json(path)
     if data is None and not os.path.exists(path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -590,6 +608,8 @@ def add_rule(path: str, rtype: str, raw: str):
 
 
 def change_type(path: str, old_type: str, new_type: str, raw: str):
+    if old_type not in RULE_TYPES or new_type not in RULE_TYPES:
+        return False, f"invalid rule type: {old_type}->{new_type}"
     data = load_json(path) or {}
     arr = (data.get("permissions") or {}).get(old_type, [])
     if raw not in arr:
@@ -616,6 +636,127 @@ def move_rule(from_path, to_path, rtype, raw, new_type=None):
 
 
 # --------------------------------------------------------------------------- #
+# Memory (Claude's auto-memory files) — discover, parse, edit
+# --------------------------------------------------------------------------- #
+MEM_TYPES = ("user", "feedback", "project", "reference")
+
+
+def _root_slug(root):
+    return "-" + str(root.expanduser().resolve()).strip("/").replace("/", "-")
+
+
+def discover_memory_dirs(root):
+    base = root.expanduser().resolve() / ".claude" / "projects"
+    dirs = []
+    if base.exists():
+        for projdir in sorted(base.iterdir()):
+            md = projdir / "memory"
+            if md.is_dir():
+                dirs.append(md)
+    return dirs
+
+
+def _mem_scope(memdir, root_slug):
+    slug = memdir.parent.name
+    if slug == root_slug:
+        return "global"
+    if slug.startswith(root_slug + "-"):
+        return slug[len(root_slug) + 1:]
+    return slug
+
+
+def parse_memory(text):
+    """Pull description, type, and body out of a memory file's frontmatter."""
+    fm, body = "", text
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            fm = text[3:end]
+            body = text[end + 4:]
+
+    def grab(pat):
+        m = re.search(pat, fm, re.M)
+        if not m:
+            return ""
+        v = m.group(1).strip()
+        # symmetric with edit_memory's json.dumps: properly unescape a quoted value
+        if len(v) >= 2 and v[0] == '"' and v[-1] == '"':
+            try:
+                return json.loads(v)
+            except ValueError:
+                pass
+        return v.strip('"').strip("'")
+
+    return {"description": grab(r'^description:\s*(.+)$'),
+            "type": grab(r'^\s*type:\s*(.+)$'),
+            "body": body.strip("\n")}
+
+
+def build_memories(root):
+    root = root.expanduser().resolve()
+    rslug = _root_slug(root)
+    out, mid = [], 0
+    for md in discover_memory_dirs(root):
+        scope = _mem_scope(md, rslug)
+        for f in sorted(md.glob("*.md")):
+            if f.name == "MEMORY.md":
+                continue
+            try:
+                text = f.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            p = parse_memory(text)
+            links = sorted(set(re.findall(r'\[\[([^\]]+)\]\]', p["body"])))
+            out.append({"id": f"m{mid}", "name": f.stem, "scope": scope,
+                        "description": p["description"], "type": p["type"] or "—",
+                        "body": p["body"], "links": links, "file": str(f)})
+            mid += 1
+    return out
+
+
+def edit_memory(path, description=None, mtype=None, body=None):
+    if not os.path.exists(path):
+        return False, "memory not found"
+    raw = Path(path).read_text(encoding="utf-8")
+    # Guard BEFORE backup/write: a body edit must never blow away frontmatter that
+    # is present but doesn't match our parser (e.g. CRLF / odd delimiters).
+    fm_match = re.match(r'^(---\n.*?\n---\n)', raw, re.S)
+    if body is not None and not fm_match and raw.lstrip().startswith("---"):
+        return False, "frontmatter present but unparseable; refusing to overwrite body"
+    bak = _backup(path)
+    if description is not None:
+        raw = re.sub(r'(?m)^description:\s*.*$',
+                     lambda m: "description: " + json.dumps(description, ensure_ascii=False),
+                     raw, count=1)
+    if mtype is not None:
+        raw = re.sub(r'(?m)^(\s*type:\s*).*$', lambda m: m.group(1) + mtype, raw, count=1)
+    if body is not None:
+        # re-match on the (possibly description/type-edited) text so those edits survive
+        m2 = re.match(r'^(---\n.*?\n---\n)', raw, re.S)
+        new_body = body.rstrip("\n") + "\n"
+        raw = (m2.group(1) + "\n" + new_body) if m2 else new_body
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(raw)
+    return True, bak
+
+
+def delete_memory(path):
+    if not os.path.exists(path):
+        return False, "memory not found"
+    bak = _backup(path)
+    base = os.path.basename(path)
+    os.remove(path)
+    idx = os.path.join(os.path.dirname(path), "MEMORY.md")
+    if os.path.exists(idx):
+        _backup(idx)
+        lines = Path(idx).read_text(encoding="utf-8").splitlines(keepends=True)
+        kept = [ln for ln in lines if f"]({base})" not in ln]
+        with open(idx, "w", encoding="utf-8") as fh:
+            fh.writelines(kept)
+    return True, bak
+
+
+# --------------------------------------------------------------------------- #
 # HTTP handler
 # --------------------------------------------------------------------------- #
 class Handler(BaseHTTPRequestHandler):
@@ -638,7 +779,36 @@ class Handler(BaseHTTPRequestHandler):
         rules = collect_rules(files)
         return files, rules
 
+    def _guard(self, post=False):
+        """Refuse requests not actually addressed to localhost (DNS-rebinding) and
+        cross-origin writes (CSRF). This server can modify your settings files, so
+        a malicious page in your browser must not be able to drive it."""
+        host = (self.headers.get("Host") or "").split(":")[0]
+        if host and host not in ("127.0.0.1", "localhost"):
+            self._json({"ok": False, "error": "host not allowed"}, 403)
+            return False
+        if post:
+            origin = self.headers.get("Origin")
+            if origin and urlparse(origin).hostname not in ("127.0.0.1", "localhost"):
+                self._json({"ok": False, "error": "cross-origin request rejected"}, 403)
+                return False
+        return True
+
+    def _in_root(self, p):
+        """True only if path p resolves to inside the scanned root — blocks writes
+        anywhere else (e.g. a crafted /etc/... target)."""
+        if not p:
+            return False
+        try:
+            root = os.path.realpath(self.root.expanduser())
+            rp = os.path.realpath(p)
+            return rp == root or rp.startswith(root + os.sep)
+        except OSError:
+            return False
+
     def do_GET(self):
+        if not self._guard():
+            return
         path = urlparse(self.path).path
         if path in ("/", "/index.html"):
             html = (HERE / "index.html").read_bytes()
@@ -660,9 +830,15 @@ class Handler(BaseHTTPRequestHandler):
                 "risks": build_risk(rules),
             })
             return
+        if path == "/api/memories":
+            self._json({"memories": build_memories(self.root),
+                        "memTypes": list(MEM_TYPES)})
+            return
         self._json({"error": "not found"}, 404)
 
     def do_POST(self):
+        if not self._guard(post=True):
+            return
         path = urlparse(self.path).path
         length = int(self.headers.get("Content-Length", 0))
         try:
@@ -677,6 +853,12 @@ class Handler(BaseHTTPRequestHandler):
         results = []
         for op in payload.get("ops", []):
             kind = op.get("kind")
+            # Confine every write to the scanned root — never write outside it.
+            targets = [op.get(k) for k in ("file", "from", "to") if op.get(k)]
+            if targets and not all(self._in_root(t) for t in targets):
+                results.append({"label": op.get("label", kind), "ok": False,
+                                "error": "path outside scanned root — refused"})
+                continue
             try:
                 if kind == "delete":
                     ok, info = remove_rule(op["file"], op["type"], op["raw"])
@@ -687,6 +869,11 @@ class Handler(BaseHTTPRequestHandler):
                 elif kind == "move":
                     ok, info = move_rule(op["from"], op["to"], op["type"],
                                          op["raw"], op.get("new_type"))
+                elif kind == "mem-edit":
+                    ok, info = edit_memory(op["file"], op.get("description"),
+                                           op.get("type"), op.get("body"))
+                elif kind == "mem-delete":
+                    ok, info = delete_memory(op["file"])
                 else:
                     ok, info = False, f"unknown op kind: {kind}"
             except KeyError as e:
