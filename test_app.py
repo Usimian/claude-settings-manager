@@ -159,6 +159,23 @@ class TestWrites(Base):
         ok2, info = S.remove_rule(self.f, "allow", "DoesNotExist")
         self.assertFalse(ok2)
 
+    def test_edit_rule(self):
+        # edits in place, preserving order and non-permission keys
+        ok, _ = S.edit_rule(self.f, "allow", "Bash(ls:*)", "Bash(ls -la:*)")
+        self.assertTrue(ok)
+        d = self._load()
+        self.assertEqual(d["permissions"]["allow"], ["Read", "Bash(ls -la:*)"])
+        self.assertEqual(d["model"], "opus")
+        # unchanged text is a no-op (no backup churn needed)
+        self.assertEqual(S.edit_rule(self.f, "allow", "Read", "Read"), (True, None))
+        # empty / missing rejected
+        self.assertFalse(S.edit_rule(self.f, "allow", "Read", "  ")[0])
+        self.assertFalse(S.edit_rule(self.f, "allow", "Nope", "X")[0])
+        # editing to a value that already exists just drops the duplicate
+        ok2, _ = S.edit_rule(self.f, "allow", "Bash(ls -la:*)", "Read")
+        self.assertTrue(ok2)
+        self.assertEqual(self._load()["permissions"]["allow"], ["Read"])
+
     def test_change_type_creates_array(self):
         ok, _ = S.change_type(self.f, "allow", "deny", "Bash(ls:*)")
         self.assertTrue(ok)

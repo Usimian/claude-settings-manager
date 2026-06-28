@@ -624,6 +624,29 @@ def change_type(path: str, old_type: str, new_type: str, raw: str):
     return True, bak
 
 
+def edit_rule(path: str, rtype: str, old_raw: str, new_raw: str):
+    if rtype not in RULE_TYPES:
+        return False, f"invalid rule type: {rtype}"
+    new_raw = (new_raw or "").strip()
+    if not new_raw:
+        return False, "new rule text is empty"
+    data = load_json(path) or {}
+    arr = (data.get("permissions") or {}).get(rtype, [])
+    if old_raw not in arr:
+        return False, "rule not found"
+    if new_raw == old_raw:
+        return True, None  # no-op
+    bak = _backup(path)
+    idx = arr.index(old_raw)
+    if new_raw in arr:        # target text already present: drop the duplicate
+        arr.remove(old_raw)
+    else:
+        arr[idx] = new_raw    # edit in place, preserving order
+    data["permissions"][rtype] = arr
+    _save(path, data)
+    return True, bak
+
+
 def move_rule(from_path, to_path, rtype, raw, new_type=None):
     new_type = new_type or rtype
     ok, info = add_rule(to_path, new_type, raw)
@@ -821,6 +844,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/scan":
             files, rules = self._state()
+            for r in rules:
+                c = classify_rule(r)
+                r["severity"] = c[0] if c else "benign"
             self._json({
                 "root": str(self.root.expanduser().resolve()),
                 "files": files,
@@ -866,6 +892,8 @@ class Handler(BaseHTTPRequestHandler):
                     ok, info = add_rule(op["file"], op["type"], op["raw"])
                 elif kind == "change-type":
                     ok, info = change_type(op["file"], op["type"], op["new_type"], op["raw"])
+                elif kind == "edit":
+                    ok, info = edit_rule(op["file"], op["type"], op["raw"], op["new_raw"])
                 elif kind == "move":
                     ok, info = move_rule(op["from"], op["to"], op["type"],
                                          op["raw"], op.get("new_type"))
