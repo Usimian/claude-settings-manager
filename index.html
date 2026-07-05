@@ -264,11 +264,11 @@ function renderPending(){
 async function applyAll(){
   if(!PENDING.length) return;
   const summary = PENDING.map(p=>" • "+p.label).join("\n");
-  if(!confirm(`Apply ${PENDING.length} change(s)?\n\nThis writes to your settings files (a timestamped backup of each is saved first).\n\n${summary}`)) return;
+  if(!confirm(`Apply ${PENDING.length} change(s)?\n\nThis writes to your settings files.\n\n${summary}`)) return;
   const ops = PENDING.map(({uid,ruleId,...op})=>op);
   const r = await fetch("/api/apply",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ops})});
   const j = await r.json();
-  if(j.ok){ toast(`applied ${ops.length} change(s) — backups saved`); }
+  if(j.ok){ toast(`applied ${ops.length} change(s)`); }
   else { const bad=(j.results||[]).filter(x=>!x.ok); toast(`${bad.length} change(s) failed: ${bad.map(b=>b.error).join("; ")}`, true); }
   PENDING=[]; EDITING=null; REDIT=null; STATE.memories=null;   // force memory refetch if touched
   await load();

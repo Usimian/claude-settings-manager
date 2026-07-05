@@ -166,7 +166,7 @@ class TestWrites(Base):
         d = self._load()
         self.assertEqual(d["permissions"]["allow"], ["Read", "Bash(ls -la:*)"])
         self.assertEqual(d["model"], "opus")
-        # unchanged text is a no-op (no backup churn needed)
+        # unchanged text is a no-op
         self.assertEqual(S.edit_rule(self.f, "allow", "Read", "Read"), (True, None))
         # empty / missing rejected
         self.assertFalse(S.edit_rule(self.f, "allow", "Read", "  ")[0])
@@ -197,24 +197,11 @@ class TestWrites(Base):
         self.assertTrue(ok)
         self.assertIn("Bash(npm run:*)", S.load_json(newf)["permissions"]["ask"])
 
-    def test_backup_created(self):
-        S.remove_rule(self.f, "allow", "Read")
-        baks = list(Path(self.f).parent.glob("settings.json.bak-*"))
-        self.assertTrue(baks)
-        # backup holds the ORIGINAL content
-        self.assertIn("Read", S.load_json(str(baks[0]))["permissions"]["allow"])
-
     def test_invalid_rtype_rejected(self):
         self.assertFalse(S.add_rule(self.f, "bogus", "X")[0])
         self.assertFalse(S.change_type(self.f, "allow", "bogus", "Read")[0])
         self.assertFalse(S.remove_rule(self.f, "bogus", "Read")[0])
         self.assertNotIn("bogus", self._load().get("permissions", {}))  # no spurious key
-
-    def test_backup_unique_within_second(self):
-        b1 = S._backup(self.f)
-        b2 = S._backup(self.f)   # same second
-        self.assertNotEqual(b1, b2)
-        self.assertTrue(os.path.exists(b1) and os.path.exists(b2))
 
     def test_unicode_preserved(self):
         S.add_rule(self.f, "allow", "Bash(echo café—✓:*)")

@@ -84,7 +84,6 @@ Permission **rule arrays** are unioned across all files, then evaluated `deny �
 ## Safety
 
 - **Nothing is written until you click Apply.** Edits stage in the UI (with undo); a confirmation lists every change before it's committed.
-- **Every modified file is backed up** to `settings.json.bak-YYYYMMDD-HHMMSS` first.
 - **Only the `permissions` arrays are touched** — `model`, `hooks`, `env`, `statusLine`, and every other key are preserved exactly.
 - Claude Code hot-reloads settings, so changes take effect without a restart.
 
@@ -105,7 +104,7 @@ The server **binds to `127.0.0.1` only** and is meant for a single local user. W
 
 - **Writes are confined to the scanned root** — an op targeting a path outside it is refused (no writing to `/etc/...`).
 - **Cross-origin and DNS-rebinding protection** — POSTs with a foreign `Origin`, or requests with a non-localhost `Host`, are rejected (403), so a malicious web page in your browser can't drive the server.
-- **Rule types are validated** (`allow`/`ask`/`deny` only) and backups are uniquely named.
+- **Rule types are validated** (`allow`/`ask`/`deny` only).
 
 Known limitations, by design:
 
@@ -117,7 +116,7 @@ Known limitations, by design:
 
 ## Testing
 
-A zero-dependency test suite covers parsing, discovery, the coverage/danger/suggestion logic, every write path (with backups + key preservation), and the full memory lifecycle:
+A zero-dependency test suite covers parsing, discovery, the coverage/danger/suggestion logic, every write path (key preservation), and the full memory lifecycle:
 
 ```bash
 python3 test_app.py            # 33 tests, stdlib unittest only

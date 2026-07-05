@@ -17,8 +17,6 @@ import argparse
 import json
 import os
 import re
-import shutil
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -550,20 +548,8 @@ def build_suggestions(rules):
 
 
 # --------------------------------------------------------------------------- #
-# Writes (with backup, preserving non-permission keys)
+# Writes (preserving non-permission keys)
 # --------------------------------------------------------------------------- #
-def _backup(path: str):
-    # Guarantee a unique name: two ops on the same file within one second (common
-    # in a batch Apply) must NOT clobber each other's backups.
-    base = f"{path}.bak-{time.strftime('%Y%m%d-%H%M%S')}"
-    bak, n = base, 1
-    while os.path.exists(bak):
-        bak = f"{base}-{n}"
-        n += 1
-    shutil.copy2(path, bak)
-    return bak
-
-
 def _save(path: str, data: dict):
     with open(path, "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
@@ -582,11 +568,10 @@ def remove_rule(path: str, rtype: str, raw: str):
     arr = (data.get("permissions") or {}).get(rtype, [])
     if raw not in arr:
         return False, "rule not found"
-    bak = _backup(path)
     arr.remove(raw)
     data["permissions"][rtype] = arr
     _save(path, data)
-    return True, bak
+    return True, None
 
 
 def add_rule(path: str, rtype: str, raw: str):
@@ -601,10 +586,9 @@ def add_rule(path: str, rtype: str, raw: str):
     _ensure_perms(data, rtype)
     if raw in data["permissions"][rtype]:
         return False, "rule already present"
-    bak = _backup(path) if os.path.exists(path) else None
     data["permissions"][rtype].append(raw)
     _save(path, data)
-    return True, bak
+    return True, None
 
 
 def change_type(path: str, old_type: str, new_type: str, raw: str):
@@ -614,14 +598,13 @@ def change_type(path: str, old_type: str, new_type: str, raw: str):
     arr = (data.get("permissions") or {}).get(old_type, [])
     if raw not in arr:
         return False, "rule not found"
-    bak = _backup(path)
     arr.remove(raw)
     data["permissions"][old_type] = arr
     _ensure_perms(data, new_type)
     if raw not in data["permissions"][new_type]:
         data["permissions"][new_type].append(raw)
     _save(path, data)
-    return True, bak
+    return True, None
 
 
 def edit_rule(path: str, rtype: str, old_raw: str, new_raw: str):
@@ -636,7 +619,6 @@ def edit_rule(path: str, rtype: str, old_raw: str, new_raw: str):
         return False, "rule not found"
     if new_raw == old_raw:
         return True, None  # no-op
-    bak = _backup(path)
     idx = arr.index(old_raw)
     if new_raw in arr:        # target text already present: drop the duplicate
         arr.remove(old_raw)
@@ -644,7 +626,7 @@ def edit_rule(path: str, rtype: str, old_raw: str, new_raw: str):
         arr[idx] = new_raw    # edit in place, preserving order
     data["permissions"][rtype] = arr
     _save(path, data)
-    return True, bak
+    return True, None
 
 
 def move_rule(from_path, to_path, rtype, raw, new_type=None):
@@ -741,12 +723,11 @@ def edit_memory(path, description=None, mtype=None, body=None):
     if not os.path.exists(path):
         return False, "memory not found"
     raw = Path(path).read_text(encoding="utf-8")
-    # Guard BEFORE backup/write: a body edit must never blow away frontmatter that
+    # Guard BEFORE write: a body edit must never blow away frontmatter that
     # is present but doesn't match our parser (e.g. CRLF / odd delimiters).
     fm_match = re.match(r'^(---\n.*?\n---\n)', raw, re.S)
     if body is not None and not fm_match and raw.lstrip().startswith("---"):
         return False, "frontmatter present but unparseable; refusing to overwrite body"
-    bak = _backup(path)
     if description is not None:
         raw = re.sub(r'(?m)^description:\s*.*$',
                      lambda m: "description: " + json.dumps(description, ensure_ascii=False),
@@ -760,23 +741,21 @@ def edit_memory(path, description=None, mtype=None, body=None):
         raw = (m2.group(1) + "\n" + new_body) if m2 else new_body
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(raw)
-    return True, bak
+    return True, None
 
 
 def delete_memory(path):
     if not os.path.exists(path):
         return False, "memory not found"
-    bak = _backup(path)
     base = os.path.basename(path)
     os.remove(path)
     idx = os.path.join(os.path.dirname(path), "MEMORY.md")
     if os.path.exists(idx):
-        _backup(idx)
         lines = Path(idx).read_text(encoding="utf-8").splitlines(keepends=True)
         kept = [ln for ln in lines if f"]({base})" not in ln]
         with open(idx, "w", encoding="utf-8") as fh:
             fh.writelines(kept)
-    return True, bak
+    return True, None
 
 
 # --------------------------------------------------------------------------- #
