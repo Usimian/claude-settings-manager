@@ -111,12 +111,12 @@ class TestClassifier(Base):
     def test_severities(self):
         cases = {
             "rm:*": "critical", "rm -rf /:*": "critical", "sudo dmesg": "critical",
-            "sudo rm -rf /:*": "critical", "ssh rider *": "high", "ssh rider cat:*": "low",
-            "ssh rider rm:*": "critical", "git push --force:*": "high",
-            "git log:*": None, "docker exec c grep:*": "high", "cat:*": None,
-            "ls:*": None, "chmod -R 777 /:*": "high", "curl:*": "high",
-            "xargs rm:*": "critical", "apt install:*": "high", "apt search:*": None,
-            "python3:*": "medium", "find . -delete:*": "high", "dd:*": "critical",
+            "sudo rm -rf /:*": "critical", "ssh rider *": "critical", "ssh rider cat:*": "low",
+            "ssh rider rm:*": "critical", "git push --force:*": "critical",
+            "git log:*": None, "docker exec c grep:*": "critical", "cat:*": None,
+            "ls:*": None, "chmod -R 777 /:*": "critical", "curl:*": "critical",
+            "xargs rm:*": "critical", "apt install:*": "critical", "apt search:*": None,
+            "python3:*": "medium", "find . -delete:*": "critical", "dd:*": "critical",
             "make:*": "medium", "kill:*": "medium",
         }
         for pat, exp in cases.items():
@@ -126,7 +126,7 @@ class TestClassifier(Base):
     def test_wildcard_and_tool_rules(self):
         self.assertEqual(S.classify_command(None)[0], "critical")
         self.assertEqual(S.classify_command("*")[0], "critical")
-        self.assertEqual(S.classify_rule({"tool": "Write", "pattern": None})[0], "high")
+        self.assertEqual(S.classify_rule({"tool": "Write", "pattern": None})[0], "critical")
         self.assertEqual(S.classify_rule({"tool": "Edit", "pattern": None})[0], "medium")
         self.assertIsNone(S.classify_rule({"tool": "Read", "pattern": None}))
 

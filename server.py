@@ -268,7 +268,7 @@ def classify_command(head, depth=0):
             if inner:
                 return (inner[0], "remote-exec", f"On a remote host: {inner[2]}")
             return ("low", "remote-exec", "Runs a fixed command on a remote host")
-        return ("high", "remote-exec", "Runs ANY command on a remote host")
+        return ("critical", "remote-exec", "Runs ANY command on a remote host")
 
     # generic wrappers — strip and recurse
     if base in GENERIC_WRAP:
@@ -288,30 +288,30 @@ def classify_command(head, depth=0):
     if base.startswith("mkfs") or base in {"dd", "fdisk", "parted", "wipefs", "blkdiscard", "sgdisk"}:
         return ("critical", "disk-write", "Can overwrite disks/filesystems")
     if base in {"shutdown", "reboot", "halt", "poweroff"}:
-        return ("high", "system-power", "Powers off or reboots the machine")
+        return ("critical", "system-power", "Powers off or reboots the machine")
     if base in {"mount", "umount"}:
-        return ("high", "mount", "Mounts/unmounts filesystems")
+        return ("critical", "mount", "Mounts/unmounts filesystems")
     if base == "systemctl" and sub in {"start", "stop", "restart", "reload", "enable",
                                        "disable", "mask", "unmask", "kill", "isolate"}:
-        return ("high", "service-control", f"systemctl {sub}: controls system services")
+        return ("critical", "service-control", f"systemctl {sub}: controls system services")
     if base == "service" and rest:
-        return ("high", "service-control", "Controls system services")
+        return ("critical", "service-control", "Controls system services")
     if base in {"kill", "pkill", "killall"}:
         return ("medium", "process-kill", f"Terminates processes ({base})")
     if base in {"chmod", "chown", "chgrp", "chattr", "setfacl"}:
-        return ("high" if recursive else "medium", "permission-change",
+        return ("critical" if recursive else "medium", "permission-change",
                 f"Changes permissions/ownership ({base})" + (" recursively" if recursive else ""))
     if base in {"curl", "wget"}:
-        return ("high", "network-fetch", "Downloads from the internet (RCE risk if piped to a shell)")
+        return ("critical", "network-fetch", "Downloads from the internet (RCE risk if piped to a shell)")
     if base in {"nc", "ncat", "netcat", "socat", "telnet"}:
-        return ("high", "network-raw", "Raw network connection / can serve a shell")
+        return ("critical", "network-raw", "Raw network connection / can serve a shell")
     if base in {"iptables", "ip6tables", "nft", "ufw", "firewall-cmd"}:
-        return ("high", "network-config", "Changes firewall/network config")
+        return ("critical", "network-config", "Changes firewall/network config")
     if base in {"scp", "sftp", "rsync"}:
         return ("medium", "file-transfer", f"Transfers files to/from remote hosts ({base})")
     if base in {"apt", "apt-get", "aptitude", "dpkg", "dnf", "yum", "pacman", "snap", "flatpak", "zypper"}:
         if any(s in toks for s in ("install", "remove", "purge", "reinstall", "autoremove")) or "-i" in flags:
-            return ("high", "package-mutation", f"Installs/removes system packages ({base})")
+            return ("critical", "package-mutation", f"Installs/removes system packages ({base})")
         return None
     if base in {"pip", "pip3", "uv", "pipx", "conda"}:
         if any(s in toks for s in ("install", "uninstall")):
@@ -323,9 +323,9 @@ def classify_command(head, depth=0):
         return None
     if base == "git":
         if sub == "push" and ("--force" in toks or "-f" in flags):
-            return ("high", "git-destructive", "Force-push can overwrite remote history")
+            return ("critical", "git-destructive", "Force-push can overwrite remote history")
         if sub == "reset" and "--hard" in toks:
-            return ("high", "git-destructive", "reset --hard discards local changes")
+            return ("critical", "git-destructive", "reset --hard discards local changes")
         if sub == "clean" and any("f" in t for t in flags):
             return ("medium", "git-destructive", "clean -f deletes untracked files")
         if sub in {"rebase", "filter-branch", "filter-repo"}:
@@ -336,9 +336,9 @@ def classify_command(head, depth=0):
             return ("low", "git-overwrite", "Can overwrite working-tree files")
         return None
     if base in SHELLS:
-        return ("high", "arbitrary-exec", f"Runs an arbitrary shell ({base})")
+        return ("critical", "arbitrary-exec", f"Runs an arbitrary shell ({base})")
     if base in {"eval", "exec", "source"} or base == ".":
-        return ("high", "arbitrary-exec", f"Executes arbitrary code ({base})")
+        return ("critical", "arbitrary-exec", f"Executes arbitrary code ({base})")
     if base in INTERP:
         return ("medium", "arbitrary-exec", f"Runs arbitrary code via {base}")
     if base in BUILD:
@@ -348,7 +348,7 @@ def classify_command(head, depth=0):
             inner = None
             if sub == "exec" and len(rest) >= 3:   # docker exec <container> <cmd...>
                 inner = classify_command(" ".join(rest[2:]), depth + 1)
-            return _worse(("high", "container",
+            return _worse(("critical", "container",
                            f"Containers run as root & can mount the host ({base} {sub})"), inner)
         if sub == "build":
             return ("medium", "container", "docker build runs arbitrary Dockerfile steps")
@@ -356,9 +356,9 @@ def classify_command(head, depth=0):
             return ("low", "container", "Removes containers/images")
         return None
     if base == "find" and "-delete" in toks:
-        return ("high", "file-deletion", "find -delete removes matched files")
+        return ("critical", "file-deletion", "find -delete removes matched files")
     if base == "find" and ("-exec" in toks or "-execdir" in toks):
-        return ("high", "arbitrary-exec", "find -exec runs arbitrary commands")
+        return ("critical", "arbitrary-exec", "find -exec runs arbitrary commands")
     if base in {"tee", "truncate"}:
         return ("medium", "file-write", f"Writes/overwrites files ({base})")
     if base == "crontab":
@@ -370,7 +370,7 @@ def classify_rule(r):
     if r["tool"] == "Bash":
         return classify_command(r["pattern"])
     if r["tool"] == "Write":
-        return ("high", "file-write", "Writes/overwrites files" + (" anywhere" if r["pattern"] is None else ""))
+        return ("critical", "file-write", "Writes/overwrites files" + (" anywhere" if r["pattern"] is None else ""))
     if r["tool"] in {"Edit", "MultiEdit"}:
         return ("medium", "file-write", "Modifies files" + (" anywhere" if r["pattern"] is None else ""))
     return None

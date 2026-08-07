@@ -9,7 +9,7 @@
     --bg: #14110f; --panel: #1f1b18; --panel2: #272220; --line: #3a322d;
     --ink: #ece6df; --dim: #9a9088; --accent: #d98a4b;
     --allow: #5fb37a; --ask: #d7a64a; --deny: #d4604f;
-    --hi: #d4604f; --med: #d7a64a; --low: #7f8a93; --info: #6a8fb0; --crit: #ff5340;
+    --med: #d7a64a; --low: #7f8a93; --info: #6a8fb0; --crit: #ff2020;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink);
@@ -52,7 +52,7 @@
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
     padding: 12px 14px; margin-bottom: 10px; }
   .card .sev { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
-  .sev-high { color: var(--hi); } .sev-medium { color: var(--med); }
+  .sev-medium { color: var(--med); }
   .sev-low { color: var(--low); } .sev-info { color: var(--info); }
   .sev-critical { color: var(--crit); font-weight: 700; }
   .sev-benign { color: var(--allow); }
@@ -194,7 +194,7 @@ async function load() {
   const hi = STATE.suggestions.filter(s => s.severity === "high").length;
   $("#cnt-sugg").textContent = STATE.suggestions.length + (hi ? ` (${hi}!)` : "");
   const autorun = STATE.risks.filter(r => r.type === "allow").length;
-  const sev = STATE.risks.filter(r => r.type === "allow" && (r.severity==="critical"||r.severity==="high")).length;
+  const sev = STATE.risks.filter(r => r.type === "allow" && r.severity==="critical").length;
   $("#cnt-risk").textContent = autorun + (sev ? ` (${sev}!)` : "");
   render();
 }
@@ -385,7 +385,6 @@ function renderAll() {
       <span class="k"><span class="sevdot sev-benign">●</span> read / benign</span>
       <span class="k"><span class="sevdot sev-low">●</span> low</span>
       <span class="k"><span class="sevdot sev-medium">●</span> medium (edits)</span>
-      <span class="k"><span class="sevdot sev-high">●</span> high</span>
       <span class="k"><span class="sevdot sev-critical">●</span> critical</span>
     </div>
     ${groups || `<div class="empty">no rules match</div>`}`;
@@ -621,8 +620,7 @@ function renderMem(){
 // ---------- Risk (what can auto-run, and could it hurt?) ----------
 const RK = { showAsk: false };
 const SEV_META = {
-  critical: {label:"Critical", color:"var(--deny)"},
-  high:     {label:"High",     color:"var(--ask)"},
+  critical: {label:"Critical", color:"var(--crit)"},
   medium:   {label:"Medium",   color:"var(--info)"},
   low:      {label:"Low",      color:"var(--low)"},
 };
@@ -641,10 +639,10 @@ function riskActionCell(r){
 function renderRisk(){
   const items = STATE.risks.filter(r => RK.showAsk ? true : r.type==="allow");
   const autorun = STATE.risks.filter(r=>r.type==="allow").length;
-  const sev = STATE.risks.filter(r=>r.type==="allow" && (r.severity==="critical"||r.severity==="high")).length;
+  const sev = STATE.risks.filter(r=>r.type==="allow" && r.severity==="critical").length;
 
   let body="";
-  for (const s of ["critical","high","medium","low"]) {
+  for (const s of ["critical","medium","low"]) {
     const g = items.filter(r=>r.severity===s);
     if(!g.length) continue;
     const m = SEV_META[s];
@@ -668,7 +666,7 @@ function renderRisk(){
 
   $("#main").innerHTML = `
     <div class="controls">
-      <span class="count"><b style="color:var(--accent)">${autorun}</b> capabilities run WITHOUT a prompt${sev?` · <b style="color:var(--deny)">${sev} critical/high</b>`:""}.
+      <span class="count"><b style="color:var(--accent)">${autorun}</b> capabilities run WITHOUT a prompt${sev?` · <b style="color:var(--crit)">${sev} critical</b>`:""}.
         Tighten with “require approval” (→ ask) or “block” (→ deny).</span>
       <label class="primary" style="margin-left:auto"><input type="checkbox" id="rkask" ${RK.showAsk?"checked":""}>&nbsp;also show items already set to “ask”</label>
     </div>
