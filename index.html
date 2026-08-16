@@ -152,6 +152,23 @@
   .memeditor textarea { font: inherit; background: var(--panel2); color: var(--ink);
     border: 1px solid var(--line); border-radius: 6px; padding: 8px; width: 100%; resize: vertical; }
   .memeditor input { width: 100%; }
+  /* defaultMode (starting permission mode) */
+  .modebox { display: flex; align-items: center; gap: 7px; padding-left: 14px;
+    border-left: 1px solid var(--line); flex-shrink: 0; }
+  .modebox .mlab { color: var(--dim); font-size: 11px; text-transform: uppercase;
+    letter-spacing: .5px; }
+  .modebox select { padding: 2px 6px; font-size: 12px; }
+  .modebar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 9px 13px; margin: 0 0 10px; }
+  .modebar .mode-src { color: var(--dim); font-size: 12px; }
+  .mode-pill { display: inline-block; padding: 1px 10px; border-radius: 20px;
+    border: 1px solid; font-size: 12px; font-weight: 700; }
+  .mode-default { color: var(--low); }
+  .mode-plan { color: var(--info); }
+  .mode-acceptEdits { color: var(--ask); }
+  .mode-bypassPermissions { color: var(--crit); }
+  .mode-dead { color: var(--dim); font-size: 11px; text-decoration: line-through; }
 </style>
 </head>
 <body>
@@ -172,7 +189,9 @@
 <div class="pendingbar" id="pendingbar"></div>
 
 <script>
-let STATE = { files: [], rules: [], suggestions: [], risks: [], memories: null, memTypes: [], scopes: {}, root: "" };
+let STATE = { files: [], rules: [], suggestions: [], risks: [], memories: null, memTypes: [],
+              scopes: {}, modes: [], effectiveModes: [], modeMeta: {}, builtinMode: "default", root: "" };
+const MODE_LIST = ["default", "plan", "acceptEdits", "bypassPermissions"];
 let TAB = "all";
 let focusQ = false;
 let PENDING = [];        // staged changes — NOTHING is written until Apply
@@ -229,6 +248,58 @@ async function loadMemories(){
 // ---------- Staging: nothing is written until Apply ----------
 function fileLabel(path){ const f=STATE.files.find(x=>x.path===path); return f?`${f.project} · ${f.scope}`:path; }
 function pendingFor(id){ return PENDING.find(p=>p.ruleId===id); }
+
+// ---------- Starting permission mode (permissions.defaultMode) ----------
+// A scalar, not a rule array: the highest-precedence file that sets it wins outright.
+function modeOf(path){ const m=(STATE.modes||[]).find(x=>x.file===path); return m?m.mode:""; }
+function modeKey(path){ return "mode:"+path; }
+function effFor(project){ return (STATE.effectiveModes||[]).find(e=>e.project===project); }
+
+function stageModeByIdx(i, mode){
+  const f = STATE.files[i]; if(!f) return;
+  if(mode === modeOf(f.path)){          // back to what's on disk → drop the staged op
+    PENDING = PENDING.filter(p=>p.ruleId!==modeKey(f.path)); render(); return;
+  }
+  stage({kind:"set-mode", ruleId:modeKey(f.path), file:f.path, mode,
+         label:`start mode ${modeOf(f.path)||"(unset)"} → ${mode||"(unset)"} @ ${fileLabel(f.path)}`});
+}
+
+function modeSelect(f){
+  const i = STATE.files.indexOf(f), p = pendingFor(modeKey(f.path));
+  const cur = p ? (p.mode||"") : modeOf(f.path);
+  const opts = ["", ...MODE_LIST].map(m =>
+    `<option value="${m}" ${m===cur?"selected":""}>${m||"— unset —"}</option>`).join("");
+  return `<span class="modebox" onclick="event.stopPropagation()">
+      <span class="mlab">start mode</span>
+      <select title="permissions.defaultMode in this file"
+        onchange="stageModeByIdx(${i}, this.value)">${opts}</select>
+      ${p?`<button onclick="unstage('${p.uid}')">undo</button>`:""}
+    </span>`;
+}
+
+function modePill(mode){
+  const meta = STATE.modeMeta[mode];
+  return `<span class="mode-pill mode-${esc(mode)}" title="${esc(meta?meta.why:"")}">${esc(mode)}</span>`;
+}
+
+// Which scope actually decides this project's starting mode, and what loses.
+function modeBar(project){
+  const e = effFor(project);
+  if(!e) return "";
+  const meta = STATE.modeMeta[e.mode];
+  const src = e.explicit
+    ? `from <b>${esc(e.from_scope_label)}</b> <span class="filepath">${esc(e.from_file)}</span>`
+    : `no file sets one — Claude Code's built-in default`;
+  const dead = e.shadowed.length
+    ? `<span class="mode-dead">outranked: ${e.shadowed.map(s =>
+        `${esc(s.mode)} (${esc(s.scope_label)})`).join(", ")}</span>` : "";
+  return `<div class="modebar">
+    <span class="mlab" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim)">starts in</span>
+    ${modePill(e.mode)}
+    <span class="mode-src">${meta?esc(meta.why):""} · ${src}</span>
+    ${dead}
+  </div>`;
+}
 function stage(op){ op.uid="u"+(++UID); if(op.ruleId!=null) PENDING=PENDING.filter(p=>p.ruleId!==op.ruleId); PENDING.push(op); render(); }
 function unstage(uid){ PENDING=PENDING.filter(p=>p.uid!==uid); render(); }
 function discardPending(){ if(PENDING.length && confirm(`Discard all ${PENDING.length} pending change(s)?`)){ PENDING=[]; render(); } }
@@ -347,13 +418,18 @@ function renderAll() {
 
   // collapse by default; auto-expand when narrowed by project or search
   const expand = F.project !== "" || F.q !== "";
+  // a rule filter hides files that match nothing; the start-mode control lives on the
+  // file, not a rule, so keep mode-carrying files listed when only project-narrowing.
+  const ruleFiltered = F.q !== "" || F.type !== "" || F.scope !== "";
 
   let groups = "";
   for (const f of fileOrder) {
     const frows = rows.filter(r => r.file === f.path).sort((a,b) =>
       TYPE_ORDER[a.type]-TYPE_ORDER[b.type] ||
       a.tool.localeCompare(b.tool) || (a.pattern||"").localeCompare(b.pattern||""));
-    if (!frows.length) continue;
+    const hasMode = !!modeOf(f.path) || !!pendingFor(modeKey(f.path));
+    const projOk = !F.project || f.project === F.project || f.project === "(global)";
+    if (!frows.length && !(hasMode && !ruleFiltered && projOk)) continue;
     const isOpen = expand || OPEN.has(f.path);
     groups += `<details class="grp" ${isOpen?"open":""} data-fp="${esc(f.path)}" ontoggle="grpToggle(this)">
       <summary>
@@ -361,6 +437,7 @@ function renderAll() {
         <span class="g-scope">${esc(STATE.scopes[f.scope].label)}</span>
         <span class="g-count">${frows.length}</span>
         <span class="g-file">${esc(f.path)}</span>
+        ${modeSelect(f)}
       </summary>
       <table><tbody>${frows.map(rowHtml).join("")}</tbody></table>
     </details>`;
@@ -425,8 +502,10 @@ function renderProject() {
       <label class="primary">Project <select id="pp" class="big">${projOpt}</select></label>
       <input type="text" id="pq" placeholder="how does a rule apply? e.g. WebSearch" value="${esc(PF.q)}">
       <span class="count">Effective rules each project sees = its own + all global rules,
-        evaluated deny→ask→allow. Greyed = shadowed by a broader same-type rule.</span>
-    </div>`;
+        evaluated deny→ask→allow. Greyed = shadowed by a broader same-type rule.
+        The start mode is a scalar — one file wins outright.</span>
+    </div>
+    ${PF.project?"":`<div class="proj-head">(no project — sessions launched outside these folders)</div>${modeBar("(global)")}`}`;
 
   let any = false;
   for (const p of shown) {
@@ -448,6 +527,7 @@ function renderProject() {
       </tr>`;
     }).join("");
     html += `<div class="proj-head">${esc(p)} — ${own.length} own + ${globals.length} global${PF.q?` · ${visible.length} match`:""}</div>
+      ${modeBar(p)}
       <table><thead><tr><th>Type</th><th>Rule</th><th>From scope</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table>`;
   }
@@ -664,7 +744,22 @@ function renderRisk(){
     </details>`;
   }
 
+  // A non-default start mode changes what this whole table means, so lead with it.
+  const loose = (STATE.effectiveModes||[]).filter(e =>
+    e.mode==="bypassPermissions" || e.mode==="acceptEdits");
+  const bypass = loose.filter(e => e.mode==="bypassPermissions");
+  const modeWarn = loose.length ? `<div class="modebar" style="border-color:${
+      bypass.length?"var(--crit)":"var(--ask)"}">
+      ${modePill(loose[0].mode)}
+      <span class="mode-src">${bypass.length
+        ? `<b style="color:var(--crit)">${bypass.map(e=>esc(e.project)).join(", ")}</b> start in bypassPermissions — nothing below prompts at all; every ask/deny rule is inert there.`
+        : `<b style="color:var(--ask)">${loose.map(e=>esc(e.project)).join(", ")}</b> start in acceptEdits — file edits apply without a prompt regardless of the rules below.`}
+      </span>
+      <button style="margin-left:auto" onclick="TAB='project';document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.tab==='project'));render()">see which file sets it</button>
+    </div>` : "";
+
   $("#main").innerHTML = `
+    ${modeWarn}
     <div class="controls">
       <span class="count"><b style="color:var(--accent)">${autorun}</b> capabilities run WITHOUT a prompt${sev?` · <b style="color:var(--crit)">${sev} critical</b>`:""}.
         Tighten with “require approval” (→ ask) or “block” (→ deny).</span>
