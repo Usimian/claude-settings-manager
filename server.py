@@ -34,18 +34,6 @@ SCOPES = {
 
 RULE_TYPES = ("deny", "ask", "allow")  # evaluation order: first match wins
 
-# permissions.defaultMode — the mode a session starts in. Unlike rule arrays
-# (which are unioned across the hierarchy) this is a scalar: the single
-# highest-precedence file that sets it wins outright.
-MODES = ("default", "acceptEdits", "plan", "bypassPermissions")
-MODE_META = {
-    "default":           ("Default", "Prompts for anything not allow-listed", None),
-    "acceptEdits":       ("Accept edits", "File edits auto-approved; other tools still prompt", "medium"),
-    "plan":              ("Plan", "Read-only until you approve a plan", None),
-    "bypassPermissions": ("Bypass", "No prompts at all — every ask/deny rule is moot", "critical"),
-}
-BUILTIN_MODE = "default"  # what Claude Code uses when no file sets one
-
 # Directories we never descend into when hunting for project settings.
 PRUNE = {
     "node_modules", ".venv", "venv", "site-packages", "build", "install",
@@ -169,58 +157,6 @@ def collect_rules(files):
                 })
                 rid += 1
     return rules
-
-
-def collect_modes(files):
-    """Every file that sets permissions.defaultMode, with its scope precedence."""
-    modes = []
-    for fmeta in files:
-        data = load_json(fmeta["path"])
-        if not data:
-            continue
-        perms = data.get("permissions")
-        if not isinstance(perms, dict):
-            continue
-        mode = perms.get("defaultMode")
-        if not isinstance(mode, str) or not mode:
-            continue
-        modes.append({
-            "mode": mode,
-            "valid": mode in MODES,
-            "scope": fmeta["scope"],
-            "scope_label": SCOPES[fmeta["scope"]][0],
-            "scope_rank": SCOPES[fmeta["scope"]][1],
-            "project": fmeta["project"],
-            "file": fmeta["path"],
-        })
-    return modes
-
-
-def effective_modes(files, modes):
-    """Resolve the starting mode each project actually gets.
-
-    Scalar precedence — managed > project-local > project-shared > user-local >
-    user — so exactly one file wins and the rest are dead weight.
-    """
-    projects = sorted({f["project"] for f in files if f["scope"].startswith("project")})
-    out = []
-    for proj in ["(global)"] + projects:
-        # A mode applies to this project if it's global/managed, or it IS this project's.
-        cands = [m for m in modes
-                 if not m["scope"].startswith("project") or m["project"] == proj]
-        cands.sort(key=lambda m: -m["scope_rank"])
-        winner = cands[0] if cands else None
-        out.append({
-            "project": proj,
-            "mode": winner["mode"] if winner else BUILTIN_MODE,
-            "from_scope": winner["scope"] if winner else None,
-            "from_scope_label": winner["scope_label"] if winner else "built-in default",
-            "from_file": winner["file"] if winner else None,
-            "explicit": winner is not None,
-            "shadowed": [{"mode": m["mode"], "scope_label": m["scope_label"], "file": m["file"]}
-                         for m in cands[1:]],
-        })
-    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -459,10 +395,8 @@ def build_risk(rules):
 # --------------------------------------------------------------------------- #
 # Suggestions engine
 # --------------------------------------------------------------------------- #
-def build_suggestions(rules, modes=None, effective=None):
+def build_suggestions(rules):
     out = []
-    modes = modes or []
-    effective = effective or []
 
     # 1. Exact duplicates within the same file
     by_file = {}
@@ -608,49 +542,6 @@ def build_suggestions(rules, modes=None, effective=None):
             "rule_ids": [r["id"] for r in rules if r["scope"].endswith("local")],
         })
 
-    # 6. defaultMode: unknown values, dead entries, and risky modes in effect
-    for m in modes:
-        if not m["valid"]:
-            out.append({
-                "kind": "mode-invalid",
-                "severity": "high",
-                "title": f"Unknown permission mode '{m['mode']}' in {m['project']}",
-                "detail": f"{m['file']} — Claude Code accepts only: {', '.join(MODES)}. "
-                          "An unrecognised value falls back to the built-in default.",
-                "rule_ids": [],
-            })
-
-    for e in effective:
-        for sh in e["shadowed"]:
-            out.append({
-                "kind": "mode-shadowed",
-                "severity": "medium",
-                "title": f"defaultMode '{sh['mode']}' never applies to {e['project']}",
-                "detail": f"{sh['file']} ({sh['scope_label']}) is outranked by "
-                          f"'{e['mode']}' from {e['from_scope_label']} — defaultMode is a scalar, "
-                          "so only the highest-precedence file wins.",
-                "rule_ids": [],
-            })
-        sev = MODE_META.get(e["mode"], (None, None, None))[2]
-        if e["mode"] == "bypassPermissions":
-            out.append({
-                "kind": "mode-risky",
-                "severity": "high",
-                "title": f"{e['project']} starts in bypassPermissions",
-                "detail": f"Set by {e['from_file']} ({e['from_scope_label']}). Nothing prompts — "
-                          "every ask and deny rule below is inert for this project.",
-                "rule_ids": [],
-            })
-        elif sev == "medium":
-            out.append({
-                "kind": "mode-risky",
-                "severity": "low",
-                "title": f"{e['project']} starts in acceptEdits",
-                "detail": f"Set by {e['from_file']} ({e['from_scope_label']}). File edits apply "
-                          "without a prompt, so Edit/Write ask rules become the only brake.",
-                "rule_ids": [],
-            })
-
     order = {"high": 0, "medium": 1, "low": 2, "info": 3}
     out.sort(key=lambda s: order.get(s["severity"], 9))
     return out
@@ -734,31 +625,6 @@ def edit_rule(path: str, rtype: str, old_raw: str, new_raw: str):
     else:
         arr[idx] = new_raw    # edit in place, preserving order
     data["permissions"][rtype] = arr
-    _save(path, data)
-    return True, None
-
-
-def set_default_mode(path: str, mode):
-    """Set (or clear, when mode is falsy) permissions.defaultMode in one file."""
-    if mode and mode not in MODES:
-        return False, f"invalid permission mode: {mode}"
-    data = load_json(path)
-    if data is None and not os.path.exists(path):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        data = {}
-    elif data is None:
-        return False, "file unreadable"
-    perms = data.setdefault("permissions", {})
-    if not isinstance(perms, dict):
-        return False, "permissions key is not an object"
-    if not mode:
-        if "defaultMode" not in perms:
-            return False, "no defaultMode to clear"
-        del perms["defaultMode"]
-    elif perms.get("defaultMode") == mode:
-        return True, None  # no-op
-    else:
-        perms["defaultMode"] = mode
     _save(path, data)
     return True, None
 
@@ -913,7 +779,7 @@ class Handler(BaseHTTPRequestHandler):
     def _state(self):
         files = discover_files(self.root)
         rules = collect_rules(files)
-        return files, rules, collect_modes(files)
+        return files, rules
 
     def _guard(self, post=False):
         """Refuse requests not actually addressed to localhost (DNS-rebinding) and
@@ -956,22 +822,16 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(html)
             return
         if path == "/api/scan":
-            files, rules, modes = self._state()
+            files, rules = self._state()
             for r in rules:
                 c = classify_rule(r)
                 r["severity"] = c[0] if c else "benign"
-            effective = effective_modes(files, modes)
             self._json({
                 "root": str(self.root.expanduser().resolve()),
                 "files": files,
                 "rules": rules,
                 "scopes": {k: {"label": v[0], "rank": v[1]} for k, v in SCOPES.items()},
-                "modes": modes,
-                "effectiveModes": effective,
-                "modeMeta": {k: {"label": v[0], "why": v[1], "severity": v[2]}
-                             for k, v in MODE_META.items()},
-                "builtinMode": BUILTIN_MODE,
-                "suggestions": build_suggestions(rules, modes, effective),
+                "suggestions": build_suggestions(rules),
                 "risks": build_risk(rules),
             })
             return
@@ -1016,8 +876,6 @@ class Handler(BaseHTTPRequestHandler):
                 elif kind == "move":
                     ok, info = move_rule(op["from"], op["to"], op["type"],
                                          op["raw"], op.get("new_type"))
-                elif kind == "set-mode":
-                    ok, info = set_default_mode(op["file"], op.get("mode"))
                 elif kind == "mem-edit":
                     ok, info = edit_memory(op["file"], op.get("description"),
                                            op.get("type"), op.get("body"))

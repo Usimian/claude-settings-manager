@@ -40,14 +40,10 @@ Requires Python 3.8+. Tested on Linux; should work anywhere Python + a browser r
 ### 🗂 All Rules
 Every permission rule from every file in one place, organized by a **Project** dropdown and collapsed into per-file groups (so it's scannable even with hundreds of rules). Filter by text, type, scope, or project. Per-rule actions: change type (`allow` ↔ `ask` ↔ `deny`), move/promote to another file, or delete — plus an add-rule form.
 
-Each file group also carries a **start mode** selector — `permissions.defaultMode`, the mode a session launched in that folder begins in (`default` / `plan` / `acceptEdits` / `bypassPermissions`, or unset). Setting it on a project's `.claude/settings.json` is how you get "this project always starts in accept-edits" without a `--permission-mode` flag.
-
 ![All Rules tab](docs/screenshot-rules.png)
 
 ### 🧭 By Project
 The **effective merged ruleset** each project actually sees (its own rules **+** all global rules), ordered `deny → ask → allow`. Type a rule (e.g. `WebSearch`) to see exactly how it resolves in each project, with rules that are shadowed by a broader one greyed out. Each row is tagged with where it came from (`global` vs `this project`).
-
-Each project also gets a **starts in** banner naming its effective start mode, which file set it, and — struck through — any lower-precedence `defaultMode` that loses. Unlike rule arrays, `defaultMode` is a **scalar**: it isn't merged, so exactly one file wins and the rest are dead weight.
 
 ### ⚠ Risk
 The headline safety view: **"what can run without asking me, and could it hurt?"** A classifier scans every rule and flags destructive / privileged / remote / arbitrary-exec capabilities (`rm`, `sudo`, `dd`, `curl`, force-push, `docker run`, shell/interpreter access, …), grouped by severity. It understands wrappers — `sudo rm` is **critical**, but `ssh host cat` is correctly **low**. One click to **require approval** (→ `ask`) or **block** (→ `deny`).
@@ -59,7 +55,6 @@ Automated cleanup, each with a one-click (staged) fix:
 - **shadowed / duplicate** — redundant rules covered by a broader one.
 - **ask labels** — every `ask` rule tagged as an active **guardrail** (it overrides an `allow`) or **redundant** under the default mode.
 - **local-only** — rules that live only in `*.local.json` (personal, not shared).
-- **mode-shadowed / mode-invalid / mode-risky** — a `defaultMode` outranked by a higher-precedence file, an unrecognised mode string, or a project starting in `acceptEdits` / `bypassPermissions`.
 
 ### 🧠 Memories
 Browse and edit Claude Code's [auto-memory](https://code.claude.com/docs/en/memory) files across every scope (your global `~/.claude/projects/.../memory/` and each project's). Filter by scope, type (`user`/`feedback`/`project`/`reference`), or full-text search; expand to read the body and follow `[[links]]`. Edit description/type/body inline or delete — staged like everything else, and a delete also removes the matching line from that scope's `MEMORY.md` index.
@@ -76,7 +71,7 @@ A quick primer, since the tool's views lean on it:
 
 **Precedence when more than one rule matches:** `deny > ask > allow` — *most restrictive wins.* So `ask` is **not** the weakest level; an `ask` rule overrides an `allow`. That's what makes `ask` useful as a guardrail.
 
-**Default when nothing matches:** depends on the session's **mode**. In `default` mode Claude Code prompts you; `plan` keeps it read-only until you approve a plan; `acceptEdits` auto-approves file edits; `bypassPermissions` skips prompting entirely (which makes every `ask`/`deny` rule inert). The mode comes from `permissions.defaultMode` in the highest-precedence file that sets one, is overridden by a `--permission-mode` flag at launch, and can be cycled live with Shift+Tab.
+**Default when nothing matches:** Claude Code prompts you.
 
 **File precedence** (for single-value settings, highest wins):
 `managed > project-local > project-shared > user-local > user`.
@@ -89,8 +84,7 @@ Permission **rule arrays** are unioned across all files, then evaluated `deny �
 ## Safety
 
 - **Nothing is written until you click Apply.** Edits stage in the UI (with undo); a confirmation lists every change before it's committed.
-- **Only `permissions` is touched** — the `allow`/`ask`/`deny` arrays and `defaultMode`. `model`, `hooks`, `env`, `statusLine`, and every other key are preserved exactly.
-- **Writes are confined to the scanned root**, and an unrecognised mode value is rejected rather than written.
+- **Only the `permissions` arrays are touched** — `model`, `hooks`, `env`, `statusLine`, and every other key are preserved exactly.
 - Claude Code hot-reloads settings, so changes take effect without a restart.
 
 ---
